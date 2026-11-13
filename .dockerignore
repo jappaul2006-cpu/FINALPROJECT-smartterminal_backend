@@ -1,0 +1,30 @@
+# Docker build context exclusions (backend / LavaLust).
+#
+# Render injects its own environment variables when the container starts.
+# A .env that is baked into the image would be loaded by LavaLust on every
+# request and would OVERRIDE those variables (putenv wins), which silently
+# breaks CORS_ORIGIN, APP_ENV, JWT_SECRET, ... on the deployed site.
+
+# ── Environment (never bake the real values into an image) ──────────────
+.env
+.env.*
+!.env.example
+
+# ── VCS / IDE ──────────────────────────────────────────────────────────
+.git
+.gitignore
+.idea
+.vscode
+*.sublime-*
+
+# ── Runtime cache & logs (must stay writable at runtime) ───────────────
+runtime/*
+!runtime/.htaccess
+!runtime/index.html
+*.log
+*.cache
+
+# ── Docs / misc ────────────────────────────────────────────────────────
+README.md
+changelog.md
+LICENSE
