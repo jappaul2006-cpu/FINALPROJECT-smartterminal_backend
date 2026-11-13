@@ -25,16 +25,20 @@ class Create_users_table {
                     'auto_increment' => TRUE,
                     'null'           => FALSE,
                 ],
-                'username' => [
+                'full_name' => [
                     'type'       => 'VARCHAR',
                     'constraint' => 100,
                     'null'       => FALSE,
                 ],
+                'username' => [
+                    'type'       => 'VARCHAR',
+                    'constraint' => 50,
+                    'null'       => FALSE,
+                ],
                 'email' => [
                     'type'       => 'VARCHAR',
-                    'constraint' => 255,
+                    'constraint' => 100,
                     'null'       => FALSE,
-                    'unique'     => TRUE,
                 ],
                 'password' => [
                     'type'       => 'VARCHAR',
@@ -43,9 +47,14 @@ class Create_users_table {
                 ],
                 'role' => [
                     'type'       => 'ENUM',
-                    'constraint' => "'admin','moderator','user'",
+                    'constraint' => "'admin','dispatcher','driver'",
                     'null'       => FALSE,
-                    'default'    => 'user',
+                    'default'    => 'dispatcher',
+                ],
+                'contact_no' => [
+                    'type'       => 'VARCHAR',
+                    'constraint' => 20,
+                    'null'       => TRUE,
                 ],
                 'is_active' => [
                     'type'       => 'TINYINT',
@@ -53,6 +62,10 @@ class Create_users_table {
                     'unsigned'   => TRUE,
                     'null'       => FALSE,
                     'default'    => 1,
+                ],
+                'last_login_at' => [
+                    'type'    => 'DATETIME',
+                    'null'    => TRUE,
                 ],
                 'created_at' => [
                     'type'    => 'DATETIME',
@@ -62,12 +75,11 @@ class Create_users_table {
                 'updated_at' => [
                     'type'    => 'DATETIME',
                     'null'    => TRUE,
-                    'default' => NULL,
                 ],
             ])
             ->add_key('id', primary: TRUE)
             ->add_key('username', unique: TRUE, name: 'username_unique')
-            ->add_key('email', name: 'email_idx')
+            ->add_key('email', unique: TRUE, name: 'email_unique')
             ->add_key('role', name: 'role_idx')
             ->create_table('users');
     }

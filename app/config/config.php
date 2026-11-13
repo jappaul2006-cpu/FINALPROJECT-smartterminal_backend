@@ -391,7 +391,9 @@ $config['security_headers'] = [
     'trust_proxy'     => false,
 
     // ── Browser features ──
-    'permissions_policy' => 'geolocation=(), microphone=(), camera=(), payment=(), usb=(), '
+    // camera=(self) keeps the boarding scanner usable while still blocking
+    // camera access for third-party (cross-origin) frames.
+    'permissions_policy' => 'geolocation=(), microphone=(), camera=(self), payment=(), usb=(), '
                           . 'bluetooth=(), serial=(), accelerometer=(), gyroscope=(), magnetometer=()',
     'referrer_policy'    => 'strict-origin-when-cross-origin',
     'coop'               => 'same-origin',
@@ -399,7 +401,7 @@ $config['security_headers'] = [
     // ── API ──
     'api_max_body' => 1048576,
     'cors' => [
-        'allowed_origins' => [],
+        'allowed_origins' => ['*'],
         'credentials'     => false,
         'methods'         => 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         'headers'         => 'Authorization, Content-Type, X-Requested-With',

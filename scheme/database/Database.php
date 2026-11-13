@@ -266,11 +266,16 @@ class Database {
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES   => false,
+            // Persistent PDO lets the PHP built-in server reuse the
+            // TCP/TLS connection to Aiven across requests instead of
+            // paying a fresh handshake on every API call.
+            PDO::ATTR_PERSISTENT         => true,
         );
 
         try {
             $this->db = new PDO($dsn, $username, $password, $options);
             $this->driver = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME);
+            $this->set_session_timezone();
         } catch (Exception $e) {
             $error = load_class('Errors', 'kernel');
             $error->show_database_error(
@@ -279,6 +284,36 @@ class Database {
                 $this->bind_values ?? [],
                 $e
             );
+        }
+    }
+
+    /**
+     * Puts the MySQL session into the application's time zone.
+     *
+     * The Aiven MySQL server runs in UTC while the application runs in
+     * Asia/Manila (config: date_default_timezone). Columns declared with
+     * DEFAULT CURRENT_TIMESTAMP - and NOW() inside queries - would
+     * therefore store UTC while every timestamp written by PHP stores local
+     * time, so the two disagree by 8 hours. Setting the session time zone
+     * makes CURRENT_TIMESTAMP / NOW() return local time as well, which keeps
+     * the database consistent with the rest of the app.
+     *
+     * @return void
+     */
+    protected function set_session_timezone()
+    {
+        if (strtolower((string) $this->driver) !== 'mysql') return;
+
+        $timezone = config_item('date_default_timezone') ?: 'Asia/Manila';
+        try {
+            $offset = (new DateTimeZone($timezone))->getOffset(new DateTime('now', new DateTimeZone('UTC')));
+            $sign   = $offset < 0 ? '-' : '+';
+            $offset = abs($offset);
+            $hours   = str_pad((string) intdiv($offset, 3600), 2, '0', STR_PAD_LEFT);
+            $minutes = str_pad((string) intdiv($offset % 3600, 60), 2, '0', STR_PAD_LEFT);
+            $this->db->exec("SET time_zone = '{$sign}{$hours}:{$minutes}'");
+        } catch (Throwable $e) {
+            error_log('[Database] could not set the session time zone: ' . $e->getMessage());
         }
     }
 

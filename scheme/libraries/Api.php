@@ -543,9 +543,11 @@ class Api
     protected function scopes_for_role($role)
     {
         $role_scopes = [
-            'admin'  => ['read', 'write', 'delete'],
-            'editor' => ['read', 'write'],
-            'user'   => ['read'],
+            'admin'      => ['read', 'write', 'delete'],
+            'dispatcher' => ['read', 'write'],
+            'driver'     => ['read', 'write'],
+            'editor'     => ['read', 'write'],
+            'user'       => ['read'],
         ];
 
         return $role_scopes[$role] ?? ['read'];
