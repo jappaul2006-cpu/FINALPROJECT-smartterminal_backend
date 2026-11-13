@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 class SmartApi extends Controller {
@@ -11,7 +11,10 @@ class SmartApi extends Controller {
      */
     public function before_action() {
         $response = load_class('response', 'kernel');
-        $corsOrigin = getenv('CORS_ORIGIN') ?: 'https://smartterminal-frontend.vercel.app';
+        $this->call->helper('cors');
+        $corsOrigin = function_exists('smartterminal_cors_origin')
+            ? smartterminal_cors_origin()
+            : (getenv('CORS_ORIGIN') ?: 'http://localhost:5173');
         $response->add_header('Access-Control-Allow-Origin', $corsOrigin);
         $response->add_header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
         $response->add_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');

@@ -1,8 +1,11 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
-// CORS headers — allow Vercel frontend to call this backend
-$corsOrigin = getenv('CORS_ORIGIN') ?: 'manga-smartterminal-frontend.vercel.app';
+// CORS headers — allow the frontend to call this backend.
+// The allowed origins come from CORS_ORIGIN (backend .env) and may list
+// several comma separated origins, e.g. the Vite dev server on :5173.
+require_once APP_DIR . 'helpers/cors_helper.php';
+$corsOrigin = smartterminal_cors_origin();
 header("Access-Control-Allow-Origin: " . $corsOrigin);
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
