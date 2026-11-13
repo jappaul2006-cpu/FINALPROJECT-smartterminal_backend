@@ -11,7 +11,8 @@ class SmartApi extends Controller {
      */
     public function before_action() {
         $response = load_class('response', 'kernel');
-        $response->add_header('Access-Control-Allow-Origin', '*');
+        $corsOrigin = getenv('CORS_ORIGIN') ?: 'https://smartterminal-frontend.vercel.app';
+        $response->add_header('Access-Control-Allow-Origin', $corsOrigin);
         $response->add_header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
         $response->add_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         if (strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
