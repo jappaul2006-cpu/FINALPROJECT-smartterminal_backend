@@ -44,7 +44,7 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 */
 /** @var object $router **/
 
-//$router->get('/', 'Welcome::index');
+$router->get('/', 'Welcome::index');
 
 // ── Smart Terminal API Routes ──
 // Auth (uses .env JWT_SECRET + REFRESH_TOKEN_KEY via LavaLust Api helper)
