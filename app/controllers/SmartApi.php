@@ -35,7 +35,15 @@ class SmartApi extends Controller {
         // hit should pay only PHP + a file read (~50ms).
         $earlyMethod = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
         if ($earlyMethod === 'GET') {
-            if ($this->try_early_cache_hit($response)) {
+            // When any Bearer token is presented, skip the shared file
+            // cache so a driver never receives the unscoped full list.
+            // The normal path below scopes the response by role.
+            $authHeader = (string) ($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
+            if ($authHeader === '' && function_exists('apache_request_headers')) {
+                $allHeaders = apache_request_headers();
+                $authHeader = (string) ($allHeaders['Authorization'] ?? '');
+            }
+            if (!preg_match('/Bearer\s+\S+/i', $authHeader) && $this->try_early_cache_hit($response)) {
                 exit;
             }
         }
@@ -92,7 +100,12 @@ class SmartApi extends Controller {
 
         $driverAllowed = [
             '#^/api/trips/\d+/(boarding|depart|complete|cancel)$#',
+            // Ticket write endpoints a driver may call. Ownership
+            // (trip must be assigned to the driver) and boarding
+            // status are enforced inside the handlers.
+            '#^/api/tickets$#',
             '#^/api/tickets/\d+/scan$#',
+            '#^/api/tickets/\d+/cancel$#',
             '#^/api/notifications#',
             '#^/api/device-tokens#',
         ];
@@ -575,6 +588,57 @@ class SmartApi extends Controller {
         return $this->require_auth(['admin', 'dispatcher', 'driver']);
     }
 
+    /**
+     * Optional driver scoping for the public GET lists.
+     *
+     * GETs stay public for the TV passenger board / anonymous viewers:
+     * no Bearer token at all -> null (legacy, unscoped behaviour).
+     * A valid token with role=admin/dispatcher -> null (unchanged).
+     * A valid driver token -> the linked drivers.id. A token that carries
+     * an invalid/expired JWT, or a driver account with no linked drivers
+     * row, FAILS CLOSED (0 = sees nothing) so a driver can never end up
+     * with wider visibility by accident.
+     */
+    private function driver_scope(): ?int {
+        try {
+            $token = $this->api_lib()->get_bearer_token();
+            if (!$token) return null; // anonymous: legacy public behaviour
+            $payload = $this->api_lib()->validate_jwt($token, 'access');
+            if (!$payload) return 0; // token presented but unusable: fail closed
+            if (($payload['role'] ?? '') !== 'driver') return null; // admin/dispatcher: unchanged
+            $uid = (int) ($payload['sub'] ?? 0);
+            if ($uid <= 0) return 0;
+            $rows = $this->call->model('Driver_model')->_find_all_by('user_id', $uid);
+            if (is_array($rows) && !empty($rows)) return (int) $rows[0]['id'];
+            return 0; // driver role but no linked profile: sees nothing
+        } catch (\Throwable $e) {
+            return 0; // fail closed, never fail open
+        }
+    }
+
+    /** Trip ids assigned to the given drivers.id (<=0 -> []). */
+    private function driver_trip_ids(int $driverId): array {
+        if ($driverId <= 0) return [];
+        $rows = $this->call->model('Trip_model')->_find_all_by('driver_id', $driverId);
+        $ids = [];
+        foreach ((array) $rows as $t) { if (!empty($t['id'])) $ids[] = (int) $t['id']; }
+        return $ids;
+    }
+
+    /**
+     * Ownership guard for writes attempted with a driver token.
+     * Returns an error message when the trip is not the driver's own,
+     * or null when the write may proceed. Non-driver tokens pass through.
+     */
+    private function driver_trip_guard(?int $scope, $trip): ?string {
+        if ($scope === null) return null; // admin/dispatcher: unchanged
+        if ($scope === 0) return 'No driver profile is linked to your account.';
+        if (!$trip || (int) ($trip['driver_id'] ?? -1) !== $scope) {
+            return 'This trip is assigned to another driver.';
+        }
+        return null;
+    }
+
     // â”€â”€ Auth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /**
@@ -831,6 +895,17 @@ class SmartApi extends Controller {
     public function trips() {
         try {
             $response = load_class('response', 'kernel');
+            $scope = $this->driver_scope();
+            if ($scope !== null) {
+                // Driver token: return only trips assigned to this driver
+                // (0 = no linked profile: empty list). The shared file
+                // cache is bypassed so an admin's full list is never leaked.
+                $data = $scope > 0
+                    ? $this->call->model('Trip_model')->_find_all_by('driver_id', $scope)
+                    : [];
+                $response->send_json_success(is_array($data) ? array_values($data) : [], 'Trips retrieved');
+                return;
+            }
             $data = $this->cached_list('api_trips', 15, function () {
                 return $this->call->model('Trip_model')->all();
             });
@@ -1353,6 +1428,23 @@ class SmartApi extends Controller {
     public function tickets() {
         try {
             $response = load_class('response', 'kernel');
+            $scope = $this->driver_scope();
+            if ($scope !== null) {
+                // Driver token: return only tickets belonging to trips
+                // assigned to this driver (0 = no linked profile: empty
+                // list). Shared cache is bypassed so nothing leaks.
+                $out = [];
+                $tripIds = $this->driver_trip_ids($scope);
+                $ticketModel = $this->call->model('Ticket_model');
+                foreach ($tripIds as $tid) {
+                    $rows = $ticketModel->_find_all_by('trip_id', $tid);
+                    if (is_array($rows)) {
+                        foreach ($rows as $row) $out[] = $row;
+                    }
+                }
+                $response->send_json_success($out, 'Tickets retrieved');
+                return;
+            }
             $data = $this->cached_list('api_tickets', 10, function () {
                 return $this->call->model('Ticket_model')->all();
             });
@@ -1373,6 +1465,9 @@ class SmartApi extends Controller {
             // Do not issue tickets for finished trips.
             $tripForCheck = $this->call->model('Trip_model')->find((int) $input['trip_id']);
             if (!$tripForCheck) { $response->send_not_found('Trip not found'); return; }
+            // Driver ownership: a driver can only issue for trips assigned to them.
+            $ownErr = $this->driver_trip_guard($this->driver_scope(), $tripForCheck);
+            if ($ownErr !== null) { $response->send_forbidden($ownErr); return; }
             $tripStatus = strtolower((string)($tripForCheck['status'] ?? ''));
             if ($tripStatus !== 'boarding') {
                 $response->send_json_error("Tickets can only be issued for trips that are currently boarding (current status: {$tripStatus}).", 422);
@@ -1430,6 +1525,13 @@ class SmartApi extends Controller {
             $m = $this->call->model('Ticket_model');
             $ticket = $m->find($id);
             if (!$ticket) { $response->send_not_found('Ticket not found'); return; }
+            // Driver ownership: a driver can only scan tickets of trips assigned to them.
+            $scanScope = $this->driver_scope();
+            if ($scanScope !== null) {
+                $scanTrip = $this->call->model('Trip_model')->find((int) $ticket['trip_id']);
+                $ownErr = $this->driver_trip_guard($scanScope, $scanTrip);
+                if ($ownErr !== null) { $response->send_forbidden($ownErr); return; }
+            }
             if (strtolower((string)($ticket['status'] ?? '')) === 'cancelled') {
                 $response->send_json_error('This ticket was cancelled and cannot be boarded.', 422);
                 return;
@@ -1491,6 +1593,13 @@ class SmartApi extends Controller {
             $m = $this->call->model('Ticket_model');
             $ticket = $m->find($id);
             if (!$ticket) { $response->send_not_found('Ticket not found'); return; }
+            // Driver ownership: a driver can only cancel tickets of trips assigned to them.
+            $cancelScope = $this->driver_scope();
+            if ($cancelScope !== null) {
+                $cancelTrip = $this->call->model('Trip_model')->find((int) $ticket['trip_id']);
+                $ownErr = $this->driver_trip_guard($cancelScope, $cancelTrip);
+                if ($ownErr !== null) { $response->send_forbidden($ownErr); return; }
+            }
             if (strtolower((string)($ticket['status'] ?? '')) === 'cancelled') {
                 $response->send_json_success($m->find($id), 'Ticket already cancelled');
                 return;
